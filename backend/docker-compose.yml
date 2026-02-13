@@ -1,0 +1,54 @@
+"""Docker Compose for local development."""
+version: '3.8'
+
+services:
+  # Microsoft SQL Server for development
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sozo-mssql
+    environment:
+      SA_PASSWORD: YourStrongPassword123!
+      ACCEPT_EULA: Y
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrongPassword123! -Q "select 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sozo-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sozo-api
+    environment:
+      DATABASE_HOST: mssql
+      DATABASE_PORT: 1433
+      DATABASE_USER: sa
+      DATABASE_PASSWORD: YourStrongPassword123!
+      DATABASE_DATABASE: sozo_dev
+      ENVIRONMENT: dev
+      DEBUG: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mssql:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - sozo-network
+
+volumes:
+  mssql_data:
+
+networks:
+  sozo-network:
+    driver: bridge
