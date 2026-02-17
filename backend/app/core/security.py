@@ -48,6 +48,7 @@ class JWTManager:
         user_email: str,
         roles: list[str],
         user_first_name: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """Create JWT access token."""
@@ -64,6 +65,7 @@ class JWTManager:
             "email": user_email,
             "first_name": user_first_name,
             "roles": roles,
+            "permissions": permissions or [],
             "iat": now,
             "exp": expires,
             "type": "access"

@@ -37,6 +37,7 @@ class TokenPayload(BaseModel):
     email: str
     first_name: Optional[str] = None
     roles: list[str]
+    permissions: Optional[list[str]] = None
     token_type: str = "access"
 
 
@@ -47,3 +48,4 @@ class JWTClaims(BaseModel):
     email: str
     first_name: Optional[str] = None
     roles: list[str]
+    permissions: Optional[list[str]] = None

@@ -19,6 +19,74 @@ jwt_manager = JWTManager()
 registered_users = {}
 
 
+async def get_role_permissions(role_id: str) -> list[str]:
+    """Fetch permissions for a given role_id.
+    
+    Returns list of permissions in format: ["resource:action", ...]
+    Example: ["PATIENT:READ", "PATIENT:CREATE", "REPORT:READ"]
+    """
+    try:
+        logger.info(f"Fetching permissions for role_id: {role_id}")
+        
+        # Step 1: Get permission_ids from role_permissions table
+        role_perms_response = await db_manager.query_table(
+            "role_permissions", 
+            filters={"role_id": role_id}
+        )
+        logger.info(f"Role permissions response: {role_perms_response}")
+        
+        if role_perms_response.get("error"):
+            logger.error(f"Error querying role_permissions: {role_perms_response.get('error')}")
+            return []
+        
+        role_perms_data = role_perms_response.get("data", [])
+        if not role_perms_data:
+            logger.warning(f"No permissions found for role_id: {role_id}")
+            return []
+        
+        # Step 2: Get all permission_ids
+        permission_ids = [
+            rp.get("permission_id") 
+            for rp in role_perms_data 
+            if rp.get("permission_id")
+        ]
+        logger.info(f"Found {len(permission_ids)} permission IDs: {permission_ids}")
+        
+        if not permission_ids:
+            logger.warning(f"No permission_ids extracted from role_permissions")
+            return []
+        
+        # Step 3: Fetch resource:action for each permission_id
+        permissions = []
+        for perm_id in permission_ids:
+            perm_response = await db_manager.query_table(
+                "permissions",
+                filters={"permission_id": perm_id}
+            )
+            
+            if perm_response.get("error"):
+                logger.error(f"Error querying permission {perm_id}: {perm_response.get('error')}")
+                continue
+            
+            perm_data = perm_response.get("data", [])
+            if perm_data:
+                perm = perm_data[0]
+                resource = perm.get("resource", "")
+                action = perm.get("action", "")
+                
+                if resource and action:
+                    permission_str = f"{resource}:{action}"
+                    permissions.append(permission_str)
+                    logger.info(f"Added permission: {permission_str}")
+        
+        logger.info(f"Total permissions fetched: {len(permissions)} - {permissions}")
+        return permissions
+        
+    except Exception as e:
+        logger.error(f"Error fetching role permissions: {str(e)}", exc_info=True)
+        return []
+
+
 @router.get("/debug/check-role/{user_email}")
 async def debug_check_user_role(user_email: str):
     """Debug endpoint to check what role a user has in the database.
@@ -537,6 +605,7 @@ async def login(credentials: LoginRequest):
         
         # Get user's role from user_roles table
         user_role = "patient"  # default role
+        role_id = None  # Initialize role_id to use later for permissions
         try:
             logger.info(f"Step 1: Querying user_roles table with user_id: {user_id}")
             user_roles_response = await db_manager.query_table("user_roles", filters={"user_id": user_id})
@@ -604,6 +673,14 @@ async def login(credentials: LoginRequest):
         
         logger.info(f"=== ROLE LOOKUP END: Final role = {user_role} ===")
 
+        # Fetch role permissions
+        permissions = []
+        if role_id:
+            logger.info(f"Fetching permissions for role_id: {role_id}")
+            permissions = await get_role_permissions(role_id)
+            logger.info(f"Permissions for role {user_role}: {permissions}")
+        else:
+            logger.warning("No role_id available to fetch permissions")
         
         # Create JWT tokens
         access_token = jwt_manager.create_access_token(
@@ -611,6 +688,7 @@ async def login(credentials: LoginRequest):
             user_email=credentials.email,
             roles=[user_role],
             user_first_name=user_data.get("first_name") if isinstance(user_data, dict) else None,
+            permissions=permissions,
         )
         
         refresh_token = jwt_manager.create_refresh_token(user_id)
