@@ -240,14 +240,4 @@ Once the server is running, access:
 4. Update documentation for significant changes
 5. Follow Python PEP 8 style guidelines
 
-## 📄 License
-
-[Add your license information here]
-
-## 👥 Team
-
-[Add team information here]
-
----
-
 **Note:** This is a production-grade healthcare platform. Ensure compliance with HIPAA and other relevant healthcare regulations in your deployment.
