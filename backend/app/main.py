@@ -16,6 +16,7 @@ from app.modules.users.router import router as users_router, register_user, logi
 from app.shared.schemas.auth import LoginRequest, TokenResponse
 from app.modules.users.schemas import UserCreate, UserResponse
 from app.modules.patients.router import router as patients_router
+from app.modules.prs import prs_router
 
 
 
@@ -225,9 +226,8 @@ async def public_login(credentials: LoginRequest):
     """
     return await users_login(credentials)
 
-# TODO: Include additional routers as modules are implemented
-# app.include_router(assessments_router, prefix=settings.api_v1_prefix)
-# app.include_router(prs_router, prefix=settings.api_v1_prefix)
+# PRS module
+app.include_router(prs_router, prefix=settings.api_v1_prefix)
 
 
 # ============================================================================
