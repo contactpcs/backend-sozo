@@ -1,11 +1,13 @@
 """Database configuration with Supabase client and SQLAlchemy engine setup."""
+import asyncio
 import logging
 from typing import AsyncGenerator, Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
+    create_async_engine,
 )
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 from supabase import create_client, Client
 
 from .config import get_settings
@@ -31,7 +33,8 @@ class DatabaseManager:
         # Initialize Supabase client
         self._initialize_supabase_client(settings)
         
-        
+        # Initialize SQLAlchemy engine and session factory
+        self._initialize_sqlalchemy(settings)
         
         logger.info(f"✓ Database connections initialized in {settings.environment.value} mode")
 
@@ -48,6 +51,40 @@ class DatabaseManager:
             logger.info(f"✓ Supabase client initialized: {supabase_url}")
         except Exception as e:
             logger.error(f"✗ Failed to initialize Supabase client: {str(e)}")
+            raise
+
+    def _initialize_sqlalchemy(self, settings) -> None:
+        """Initialize SQLAlchemy async engine and session factory."""
+        try:
+            database_url = settings.database_url
+            
+            # Convert standard PostgreSQL URL to async version if needed
+            if database_url.startswith("postgresql://"):
+                database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif database_url.startswith("postgres://"):
+                database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+            
+            # Create async engine
+            self._engine = create_async_engine(
+                database_url,
+                echo=False,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_pre_ping=True,
+            )
+            
+            # Create session factory
+            self._session_factory = sessionmaker(
+                self._engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autocommit=False,
+                autoflush=False,
+            )
+            
+            logger.info(f"✓ SQLAlchemy engine initialized: {database_url}")
+        except Exception as e:
+            logger.error(f"✗ Failed to initialize SQLAlchemy engine: {str(e)}")
             raise
 
 
@@ -118,52 +155,66 @@ class DatabaseManager:
 
     # Supabase convenience methods
     async def query_table(self, table: str, select: str = "*", filters: Optional[Dict[str, Any]] = None) -> Dict:
-        """Query a table using Supabase client."""
+        """Query a table using Supabase client (non-blocking)."""
         try:
-            query = self.supabase.table(table).select(select)
+            loop = asyncio.get_event_loop()
             
-            if filters:
-                for column, value in filters.items():
-                    query = query.eq(column, value)
+            def _query():
+                query = self.supabase.table(table).select(select)
+                if filters:
+                    for column, value in filters.items():
+                        query = query.eq(column, value)
+                return query.execute()
             
-            response = query.execute()
+            response = await loop.run_in_executor(None, _query)
             return {"data": response.data, "count": response.count, "error": None}
         except Exception as e:
             logger.error(f"Supabase query failed for table {table}: {str(e)}")
             return {"data": None, "count": 0, "error": str(e)}
 
     async def insert_record(self, table: str, data: Dict[str, Any]) -> Dict:
-        """Insert a record using Supabase client."""
+        """Insert a record using Supabase client (non-blocking)."""
         try:
-            response = self.supabase.table(table).insert(data).execute()
+            loop = asyncio.get_event_loop()
+            
+            def _insert():
+                return self.supabase.table(table).insert(data).execute()
+            
+            response = await loop.run_in_executor(None, _insert)
             return {"data": response.data, "error": None}
         except Exception as e:
             logger.error(f"Supabase insert failed for table {table}: {str(e)}")
             return {"data": None, "error": str(e)}
 
     async def update_record(self, table: str, data: Dict[str, Any], filters: Dict[str, Any]) -> Dict:
-        """Update records using Supabase client."""
+        """Update records using Supabase client (non-blocking)."""
         try:
-            query = self.supabase.table(table).update(data)
+            loop = asyncio.get_event_loop()
             
-            for column, value in filters.items():
-                query = query.eq(column, value)
+            def _update():
+                query = self.supabase.table(table).update(data)
+                for column, value in filters.items():
+                    query = query.eq(column, value)
+                return query.execute()
             
-            response = query.execute()
+            response = await loop.run_in_executor(None, _update)
             return {"data": response.data, "error": None}
         except Exception as e:
             logger.error(f"✗ Supabase update failed for table {table}: {str(e)}")
             return {"data": None, "error": str(e)}
 
     async def delete_record(self, table: str, filters: Dict[str, Any]) -> Dict:
-        """Delete records using Supabase client."""
+        """Delete records using Supabase client (non-blocking)."""
         try:
-            query = self.supabase.table(table).delete()
+            loop = asyncio.get_event_loop()
             
-            for column, value in filters.items():
-                query = query.eq(column, value)
+            def _delete():
+                query = self.supabase.table(table).delete()
+                for column, value in filters.items():
+                    query = query.eq(column, value)
+                return query.execute()
             
-            response = query.execute()
+            response = await loop.run_in_executor(None, _delete)
             return {"data": response.data, "error": None}
         except Exception as e:
             logger.error(f"✗ Supabase delete failed for table {table}: {str(e)}")
@@ -173,6 +224,10 @@ class DatabaseManager:
 # Global database manager
 db_manager = DatabaseManager()
 
+
+def get_supabase_client() -> Client:
+    """Get the Supabase client instance."""
+    return db_manager.supabase
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

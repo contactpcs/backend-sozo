@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     api_title: str = Field(default="Neurowellness Healthcare Platform API")
     
     # CORS
-    cors_origins: list[str] = Field(default=["http://localhost:3000", "http://localhost:8000", "http://localhost:8080", "http://localhost:5173"])
+    cors_origins: list[str] = Field(default=["http://localhost:3000","http://localhost:3001", "http://localhost:8000", "http://localhost:8080", "http://localhost:5173", "http://127.0.0.1:3000"])
     cors_credentials: bool = Field(default=True)
     cors_methods: list[str] = Field(default=["GET", "POST", "PUT", "DELETE", "PATCH"])
     cors_headers: list[str] = Field(default=["*"])

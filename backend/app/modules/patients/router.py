@@ -61,6 +61,75 @@ async def search_patients(
         )
 
 
+@router.get("/me/profile", response_model=PatientDetailResponse)
+async def get_my_profile(
+    current_user: JWTClaims = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get current user's patient profile."""
+    # Ensure ONLY patients can access this endpoint
+    if "patient" not in [role.lower() for role in current_user.roles]:
+        logger.warning(f"Non-patient user {current_user.email} (roles: {current_user.roles}) tried to access patient profile")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only patients can have a patient profile"
+        )
+        
+    try:
+        service = PatientService(db)
+        return await service.get_patient_by_user(current_user.user_id)
+    except NeurowellnessException as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message
+        )
+
+
+@router.get("/center/{center_id}/list", response_model=dict)
+async def list_center_patients(
+    center_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: JWTClaims = Depends(require_roles(
+        UserRole.CLINICAL_ADMIN.value,
+        UserRole.DOCTOR.value,
+        UserRole.SUPER_ADMIN.value
+    )),
+    db: AsyncSession = Depends(get_db)
+):
+    """List patients at a center."""
+    try:
+        service = PatientService(db)
+        return await service.list_patients_by_center(center_id, page, page_size)
+    except NeurowellnessException as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message
+        )
+
+
+@router.get("/clinician/{clinician_id}/list", response_model=dict)
+async def list_clinician_patients(
+    clinician_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: JWTClaims = Depends(require_roles(
+        UserRole.DOCTOR.value,
+        UserRole.SUPER_ADMIN.value
+    )),
+    db: AsyncSession = Depends(get_db)
+):
+    """List patients assigned to clinician."""
+    try:
+        service = PatientService(db)
+        return await service.list_patients_by_clinician(clinician_id, page, page_size)
+    except NeurowellnessException as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message
+        )
+
+
 @router.get("/{patient_id}", response_model=PatientDetailResponse)
 async def get_patient(
     patient_id: str,
@@ -82,22 +151,6 @@ async def get_patient(
             )
         
         return patient
-    except NeurowellnessException as e:
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.message
-        )
-
-
-@router.get("/me/profile", response_model=PatientDetailResponse)
-async def get_my_profile(
-    current_user: JWTClaims = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get current user's patient profile."""
-    try:
-        service = PatientService(db)
-        return await service.get_patient_by_user(current_user.user_id)
     except NeurowellnessException as e:
         raise HTTPException(
             status_code=e.status_code,
@@ -198,51 +251,6 @@ async def assign_to_clinician(
     try:
         service = PatientService(db)
         return await service.assign_to_clinician(patient_id, clinician_id)
-    except NeurowellnessException as e:
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.message
-        )
-
-
-@router.get("/center/{center_id}/list", response_model=dict)
-async def list_center_patients(
-    center_id: str,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    current_user: JWTClaims = Depends(require_roles(
-        UserRole.CLINICAL_ADMIN.value,
-        UserRole.DOCTOR.value,
-        UserRole.SUPER_ADMIN.value
-    )),
-    db: AsyncSession = Depends(get_db)
-):
-    """List patients at a center."""
-    try:
-        service = PatientService(db)
-        return await service.list_patients_by_center(center_id, page, page_size)
-    except NeurowellnessException as e:
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.message
-        )
-
-
-@router.get("/clinician/{clinician_id}/list", response_model=dict)
-async def list_clinician_patients(
-    clinician_id: str,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    current_user: JWTClaims = Depends(require_roles(
-        UserRole.DOCTOR.value,
-        UserRole.SUPER_ADMIN.value
-    )),
-    db: AsyncSession = Depends(get_db)
-):
-    """List patients assigned to clinician."""
-    try:
-        service = PatientService(db)
-        return await service.list_patients_by_clinician(clinician_id, page, page_size)
     except NeurowellnessException as e:
         raise HTTPException(
             status_code=e.status_code,
