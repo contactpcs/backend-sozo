@@ -24,8 +24,11 @@ async def get_role_permissions(role_id: str) -> list[str]:
     
     Returns list of permissions in format: ["resource:action", ...]
     Example: ["PATIENT:READ", "PATIENT:CREATE", "REPORT:READ"]
+    Fetches all permissions in parallel for better performance.
     """
     try:
+        import asyncio
+        
         logger.info(f"Fetching permissions for role_id: {role_id}")
         
         # Step 1: Get permission_ids from role_permissions table
@@ -56,21 +59,20 @@ async def get_role_permissions(role_id: str) -> list[str]:
             logger.warning(f"No permission_ids extracted from role_permissions")
             return []
         
-        # Step 3: Fetch resource:action for each permission_id
+        # Step 3: Fetch ALL permissions in parallel (not sequentially!)
+        perm_queries = [
+            db_manager.query_table("permissions", filters={"permission_id": perm_id})
+            for perm_id in permission_ids
+        ]
+        
+        perm_responses = await asyncio.gather(*perm_queries, return_exceptions=False)
+        logger.info(f"Fetched {len(perm_responses)} permissions in parallel")
+        
+        # Step 4: Extract resource:action from all responses
         permissions = []
-        for perm_id in permission_ids:
-            perm_response = await db_manager.query_table(
-                "permissions",
-                filters={"permission_id": perm_id}
-            )
-            
-            if perm_response.get("error"):
-                logger.error(f"Error querying permission {perm_id}: {perm_response.get('error')}")
-                continue
-            
-            perm_data = perm_response.get("data", [])
-            if perm_data:
-                perm = perm_data[0]
+        for idx, perm_response in enumerate(perm_responses):
+            if perm_response.get("data") and len(perm_response["data"]) > 0:
+                perm = perm_response["data"][0]
                 resource = perm.get("resource", "")
                 action = perm.get("action", "")
                 
@@ -78,6 +80,8 @@ async def get_role_permissions(role_id: str) -> list[str]:
                     permission_str = f"{resource}:{action}"
                     permissions.append(permission_str)
                     logger.info(f"Added permission: {permission_str}")
+            elif perm_response.get("error"):
+                logger.error(f"Error querying permission {permission_ids[idx]}: {perm_response.get('error')}")
         
         logger.info(f"Total permissions fetched: {len(permissions)} - {permissions}")
         return permissions
@@ -555,10 +559,12 @@ async def login(credentials: LoginRequest):
     """Login user with JWT token generation.
     
     1. Verifies email and password against users table
-    2. Gets user's role from user_roles and roles tables
+    2. Gets user's role from user_roles and roles tables (fetched in parallel)
     3. Creates JWT token with user info and role
     """
     try:
+        import asyncio
+        
         # First try to check Supabase database
         logger.info(f"Login attempt for: {credentials.email}")
         user_response = await db_manager.query_table("users", filters={"email": credentials.email})
@@ -625,10 +631,14 @@ async def login(credentials: LoginRequest):
                     logger.error(f"✗ No role_id field in user_role record. Available fields: {user_role_record.keys()}")
                     raise Exception("role_id field not found in user_roles table")
                 
-                logger.info(f"Step 3: Found role_id: {role_id}, now querying roles table")
+                logger.info(f"Step 3: Found role_id: {role_id}, fetching roles and permissions in parallel")
                 
-                # Get role details from roles table
-                role_response = await db_manager.query_table("roles", filters={"role_id": role_id})
+                # Fetch roles table AND permissions in parallel (both depend only on role_id)
+                role_response, permissions = await asyncio.gather(
+                    db_manager.query_table("roles", filters={"role_id": role_id}),
+                    get_role_permissions(role_id),
+                    return_exceptions=False
+                )
                 logger.info(f"Step 3 Response: {role_response}")
                 
                 if role_response.get("error"):
@@ -660,27 +670,22 @@ async def login(credentials: LoginRequest):
                     }
                     user_role = role_name_reverse_map.get(role_name, "patient")
                     logger.info(f"✓✓✓ SUCCESS: User role resolved: {user_role} (from DB role: {role_name})")
+                    logger.info(f"Permissions for role {user_role}: {permissions}")
                 else:
                     logger.error(f"✗ NO ROLE FOUND in roles table for role_id: {role_id}")
                     logger.error(f"   This means the role_id in user_roles doesn't match any role in roles table")
+                    permissions = []
             else:
                 logger.error(f"✗ NO USER_ROLE RECORD found in user_roles table for user_id: {user_id}")
                 logger.error(f"   The user exists but has no entry in user_roles table!")
                 logger.error(f"   This user was likely registered incorrectly - user will default to 'patient'")
+                permissions = []
         except Exception as e:
             logger.error(f"✗✗✗ EXCEPTION while fetching user role: {str(e)}", exc_info=True)
             logger.error(f"   User will default to 'patient' role - CHECK THE LOGS ABOVE!")
+            permissions = []
         
         logger.info(f"=== ROLE LOOKUP END: Final role = {user_role} ===")
-
-        # Fetch role permissions
-        permissions = []
-        if role_id:
-            logger.info(f"Fetching permissions for role_id: {role_id}")
-            permissions = await get_role_permissions(role_id)
-            logger.info(f"Permissions for role {user_role}: {permissions}")
-        else:
-            logger.warning("No role_id available to fetch permissions")
         
         # Create JWT tokens
         access_token = jwt_manager.create_access_token(

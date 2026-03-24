@@ -67,6 +67,14 @@ async def get_my_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """Get current user's patient profile."""
+    # Ensure ONLY patients can access this endpoint
+    if "patient" not in [role.lower() for role in current_user.roles]:
+        logger.warning(f"Non-patient user {current_user.email} (roles: {current_user.roles}) tried to access patient profile")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only patients can have a patient profile"
+        )
+        
     try:
         service = PatientService(db)
         return await service.get_patient_by_user(current_user.user_id)
